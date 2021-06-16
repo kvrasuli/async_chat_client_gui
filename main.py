@@ -1,27 +1,44 @@
 import asyncio
 import gui
-import time
 import logging
 import configargparse
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__file__)
 
 
-async def generate_msgs(queue):
-    while True:
-        queue.put_nowait(time.time())
-        await asyncio.sleep(1)
+@asynccontextmanager
+async def open_socket(host, port): 
+    try:
+        reader, writer = await asyncio.open_connection(host, port)
+        yield reader, writer
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
-async def main():
+async def read_msgs(host, port, queue):
+    try:
+        async with open_socket(host, port) as stream:
+            while True:
+                reader, _ = stream[0], stream[1]
+                chat_line = await reader.readline()
+                queue.put_nowait(chat_line.decode().strip())
+    except ConnectionError:
+        logger.error('Reading error!')
+        await asyncio.sleep(10)
+
+
+async def main(host, rport, wport):
     messages_queue = asyncio.Queue()
     sending_queue = asyncio.Queue()
     status_updates_queue = asyncio.Queue()
     group = await asyncio.gather(
         gui.draw(messages_queue, sending_queue, status_updates_queue),
-        generate_msgs(messages_queue),
+        read_msgs(host, rport, messages_queue),
     )
+
 
 def parse_args():
     load_dotenv()
@@ -42,4 +59,4 @@ if __name__ == '__main__':
     if args.log:
         logging.basicConfig(level=logging.DEBUG)
     
-    asyncio.run(main()) 
+    asyncio.run(main(args.host, args.rport, args.wport)) 

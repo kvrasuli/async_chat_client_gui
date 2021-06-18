@@ -26,6 +26,12 @@ async def save_msgs(filepath, queue):
         async with aiofiles.open(filepath, 'a', encoding='utf-8') as file:
             await file.write(f'{chat_line}\n')
 
+
+async def send_msgs(host, port, queue):
+    while True:
+        msg = await queue.get()
+        print(msg)
+
             
 async def read_msgs(host, port, queue, saving_queue, filepath):
     try:
@@ -60,6 +66,7 @@ async def main(host, rport, wport, path):
         gui.draw(messages_queue, sending_queue, status_updates_queue),
         read_msgs(host, rport, messages_queue, saving_queue, path),
         save_msgs(path, saving_queue),
+        send_msgs(host, wport, sending_queue),
     )
 
 

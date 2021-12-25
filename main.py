@@ -57,44 +57,54 @@ async def authorize(reader, writer, token):
         raise InvalidToken
     nickname = ast.literal_eval(answer.decode())["nickname"]
     print(f"выполнена авторизация. юзер {nickname}")
+    return nickname
 
 
-async def send_msgs(host, port, token, queue):
-    async with open_socket(host, port) as stream:
-        reader, writer = stream[0], stream[1]
-        try:
-            await authorize(reader, writer, token)
-        except InvalidToken:
-            messagebox.showerror(
-                "Неверный токен", "Проверьте токен, сервер его не узнал"
-            )
-            raise
-        while True:
-            message = await queue.get()
-            await submit_message(reader, writer, message)
+async def send_msgs(host, port, token, sending_queue, status_updates_queue):
+    try:
+        async with open_socket(host, port) as stream:
+            status_updates_queue.put_nowait(gui.SendingConnectionStateChanged.ESTABLISHED)
+            reader, writer = stream[0], stream[1]
+            try:
+                nickname = await authorize(reader, writer, token)
+                event = gui.NicknameReceived(nickname)
+                status_updates_queue.put_nowait(event)
+            except InvalidToken:
+                messagebox.showerror(
+                    "Неверный токен", "Проверьте токен, сервер его не узнал"
+                )
+                raise
+            while True:
+                message = await sending_queue.get()
+                await submit_message(reader, writer, message)
+    except ConnectionError:
+        logger.error("Reading error!")
+        status_updates_queue.put_nowait(gui.SendingConnectionStateChanged.CLOSED)
+        await asyncio.sleep(10)
 
 
-async def read_msgs(host, port, queue, saving_queue, filepath):
+async def read_msgs(host, port, reading_queue, saving_queue, status_updates_queue, filepath):
     try:
         async with aiofiles.open(filepath, "r", encoding="utf-8") as file:
             history = await file.readlines()
         for line in history:
-            queue.put_nowait(line.strip())
+            reading_queue.put_nowait(line.strip())
     except FileNotFoundError:
         logger.info("First launch.")
-
     try:
         async with open_socket(host, port) as stream:
+            status_updates_queue.put_nowait(gui.ReadConnectionStateChanged.ESTABLISHED)
             while True:
                 reader, _ = stream[0], stream[1]
                 chat_line = await reader.readline()
                 decoded_chat_line = chat_line.decode().strip()
                 timestamp = datetime.datetime.now().strftime("%d.%m.%y %H:%M:%S")
                 chat_line_with_timestamp = f"[{timestamp}] {decoded_chat_line}"
-                queue.put_nowait(chat_line_with_timestamp)
+                reading_queue.put_nowait(chat_line_with_timestamp)
                 saving_queue.put_nowait(chat_line_with_timestamp)
     except ConnectionError:
         logger.error("Reading error!")
+        status_updates_queue.put_nowait(gui.ReadConnectionStateChanged.CLOSED)
         await asyncio.sleep(10)
 
 
@@ -108,10 +118,10 @@ async def main(host, rport, wport, token, path):
             gui.draw(messages_queue, sending_queue, status_updates_queue)
         ),
         asyncio.ensure_future(
-            read_msgs(host, rport, messages_queue, saving_queue, path)
+            read_msgs(host, rport, messages_queue, saving_queue, status_updates_queue, path)
         ),
         asyncio.ensure_future(save_msgs(path, saving_queue)),
-        asyncio.ensure_future(send_msgs(host, wport, token, sending_queue)),
+        asyncio.ensure_future(send_msgs(host, wport, token, sending_queue, status_updates_queue)),
     ]
     try:
         await asyncio.gather(*tasks)

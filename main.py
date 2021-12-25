@@ -13,7 +13,7 @@ logger = logging.getLogger(__file__)
 
 
 @asynccontextmanager
-async def open_socket(host, port): 
+async def open_socket(host, port):
     try:
         reader, writer = await asyncio.open_connection(host, port)
         yield reader, writer
@@ -29,33 +29,33 @@ class InvalidToken(Exception):
 async def save_msgs(filepath, queue):
     while True:
         chat_line = await queue.get()
-        async with aiofiles.open(filepath, 'a', encoding='utf-8') as file:
-            await file.write(f'{chat_line}\n')
+        async with aiofiles.open(filepath, "a", encoding="utf-8") as file:
+            await file.write(f"{chat_line}\n")
 
 
 async def submit_message(reader, writer, message):
-    message = message.replace('\n', '')
-    writer.write(f'{message}\n\n'.encode())
+    message = message.replace("\n", "")
+    writer.write(f"{message}\n\n".encode())
     await writer.drain()
-    logger.debug(f'Sending a message {message}...')
+    logger.debug(f"Sending a message {message}...")
     answer = await reader.readline()
     logger.debug(answer.decode())
 
 
 async def authorize(reader, writer, token):
-    writer.write(f'{token}\n'.encode())
+    writer.write(f"{token}\n".encode())
     await writer.drain()
-    logger.debug(f'{token} has been sent!')
+    logger.debug(f"{token} has been sent!")
     answer = await reader.readline()
     decoded_answer = answer.decode()
-    logger.debug(f'{decoded_answer}')
+    logger.debug(f"{decoded_answer}")
     answer = await reader.readline()
     decoded_answer = answer.decode()
-    logger.debug(f'{answer.decode()}')
-    if decoded_answer == 'null\n':
-        logger.debug('The token isn\'t valid, check it or register again.')
+    logger.debug(f"{answer.decode()}")
+    if decoded_answer == "null\n":
+        logger.debug("The token isn't valid, check it or register again.")
         raise InvalidToken
-    nickname = ast.literal_eval(answer.decode())['nickname']
+    nickname = ast.literal_eval(answer.decode())["nickname"]
     print(f"выполнена авторизация. юзер {nickname}")
 
 
@@ -65,21 +65,23 @@ async def send_msgs(host, port, token, queue):
         try:
             await authorize(reader, writer, token)
         except InvalidToken:
-            messagebox.showerror('Неверный токен', 'Проверьте токен, сервер его не узнал')
+            messagebox.showerror(
+                "Неверный токен", "Проверьте токен, сервер его не узнал"
+            )
             raise
         while True:
             message = await queue.get()
             await submit_message(reader, writer, message)
 
-            
+
 async def read_msgs(host, port, queue, saving_queue, filepath):
     try:
-        async with aiofiles.open(filepath, 'r', encoding='utf-8') as file:
+        async with aiofiles.open(filepath, "r", encoding="utf-8") as file:
             history = await file.readlines()
         for line in history:
             queue.put_nowait(line.strip())
     except FileNotFoundError:
-        logger.info('First launch.')
+        logger.info("First launch.")
 
     try:
         async with open_socket(host, port) as stream:
@@ -87,12 +89,12 @@ async def read_msgs(host, port, queue, saving_queue, filepath):
                 reader, _ = stream[0], stream[1]
                 chat_line = await reader.readline()
                 decoded_chat_line = chat_line.decode().strip()
-                timestamp = datetime.datetime.now().strftime('%d.%m.%y %H:%M:%S')
-                chat_line_with_timestamp = f'[{timestamp}] {decoded_chat_line}'
+                timestamp = datetime.datetime.now().strftime("%d.%m.%y %H:%M:%S")
+                chat_line_with_timestamp = f"[{timestamp}] {decoded_chat_line}"
                 queue.put_nowait(chat_line_with_timestamp)
                 saving_queue.put_nowait(chat_line_with_timestamp)
     except ConnectionError:
-        logger.error('Reading error!')
+        logger.error("Reading error!")
         await asyncio.sleep(10)
 
 
@@ -102,8 +104,12 @@ async def main(host, rport, wport, token, path):
     status_updates_queue = asyncio.Queue()
     saving_queue = asyncio.Queue()
     tasks = [
-        asyncio.ensure_future(gui.draw(messages_queue, sending_queue, status_updates_queue)),
-        asyncio.ensure_future(read_msgs(host, rport, messages_queue, saving_queue, path)),
+        asyncio.ensure_future(
+            gui.draw(messages_queue, sending_queue, status_updates_queue)
+        ),
+        asyncio.ensure_future(
+            read_msgs(host, rport, messages_queue, saving_queue, path)
+        ),
         asyncio.ensure_future(save_msgs(path, saving_queue)),
         asyncio.ensure_future(send_msgs(host, wport, token, sending_queue)),
     ]
@@ -117,17 +123,16 @@ async def main(host, rport, wport, token, path):
 def parse_args():
     load_dotenv()
     parser = configargparse.ArgParser()
-    parser.add('--host', help='address of host', env_var='CHAT_HOST')
-    parser.add('--rport', help='number of port', env_var='CHAT_PORT_TO_READ')
-    parser.add('--wport', help='number of port', env_var='CHAT_PORT_TO_WRITE')
+    parser.add("--host", help="address of host", env_var="CHAT_HOST")
+    parser.add("--rport", help="number of port", env_var="CHAT_PORT_TO_READ")
+    parser.add("--wport", help="number of port", env_var="CHAT_PORT_TO_WRITE")
     parser.add(
-        '--path', help='path to chat history file',
-        env_var='CHAT_HISTORY_FILE_PATH'
+        "--path", help="path to chat history file", env_var="CHAT_HISTORY_FILE_PATH"
     )
-    parser.add('--token', help='chat token', env_var='CHAT_TOKEN')
-    parser.add('--nickname', help='your nickname', env_var='CHAT_NICKNAME')
-    parser.add('-m', '--message', help='message to send') # , required=True
-    parser.add('--log', help='enable logs', action='store_true')
+    parser.add("--token", help="chat token", env_var="CHAT_TOKEN")
+    parser.add("--nickname", help="your nickname", env_var="CHAT_NICKNAME")
+    parser.add("-m", "--message", help="message to send")  # , required=True
+    parser.add("--log", help="enable logs", action="store_true")
     return parser.parse_args()
 
 

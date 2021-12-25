@@ -1,6 +1,7 @@
 import asyncio
 import aiofiles
 import datetime
+import ast
 import gui
 import logging
 import configargparse
@@ -27,10 +28,43 @@ async def save_msgs(filepath, queue):
             await file.write(f'{chat_line}\n')
 
 
-async def send_msgs(host, port, queue):
-    while True:
-        msg = await queue.get()
-        print(msg)
+async def submit_message(reader, writer, message):
+    message = message.replace('\n', '')
+    writer.write(f'{message}\n\n'.encode())
+    await writer.drain()
+    logger.debug(f'Sending a message {message}...')
+    answer = await reader.readline()
+    logger.debug(answer.decode())
+
+
+async def authorize(reader, writer, token):
+    writer.write(f'{token}\n'.encode())
+    await writer.drain()
+    logger.debug(f'{token} has been sent!')
+    answer = await reader.readline()
+    decoded_answer = answer.decode()
+    logger.debug(f'{decoded_answer}')
+    if decoded_answer.startswith('Welcome'):
+        return False
+    elif decoded_answer == 'null\n':
+        logger.debug('The token isn\'t valid, check it or register again.')
+        return True
+    answer = await reader.readline()
+    logger.debug(f'{answer.decode()}')
+    nickname = ast.literal_eval(answer.decode())['nickname']
+    print(f"выполнена авторизация. юзер {nickname}")
+    return False
+
+
+async def send_msgs(host, port, token, queue):
+    async with open_socket(host, port) as stream:
+        reader, writer = stream[0], stream[1]
+        error = await authorize(reader, writer, token)
+
+        while True:
+            message = await queue.get()
+            if not error:
+                await submit_message(reader, writer, message)
 
             
 async def read_msgs(host, port, queue, saving_queue, filepath):
@@ -57,16 +91,16 @@ async def read_msgs(host, port, queue, saving_queue, filepath):
         await asyncio.sleep(10)
 
 
-async def main(host, rport, wport, path):
+async def main(host, rport, wport, token, path):
     messages_queue = asyncio.Queue()
     sending_queue = asyncio.Queue()
     status_updates_queue = asyncio.Queue()
     saving_queue = asyncio.Queue()
-    group = await asyncio.gather(
+    await asyncio.gather(
         gui.draw(messages_queue, sending_queue, status_updates_queue),
         read_msgs(host, rport, messages_queue, saving_queue, path),
         save_msgs(path, saving_queue),
-        send_msgs(host, wport, sending_queue),
+        send_msgs(host, wport, token, sending_queue),
     )
 
 
@@ -93,4 +127,4 @@ if __name__ == '__main__':
     if args.log:
         logging.basicConfig(level=logging.DEBUG)
     
-    asyncio.run(main(args.host, args.rport, args.wport, args.path)) 
+    asyncio.run(main(args.host, args.rport, args.wport, args.token, args.path)) 
